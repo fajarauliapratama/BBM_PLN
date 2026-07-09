@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "922484244108",
+    "project_id": "bbm-pln",
+    "storage_bucket": "bbm-pln.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:922484244108:android:f564146a05ec1d42d605a9",
+        "android_client_info": {
+          "package_name": "com.example.bbm_pln"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyA3GaP_fJoTueooZZUpMFlfZ2kJr0BR8dA"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
