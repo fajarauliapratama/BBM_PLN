@@ -2,6 +2,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:google_mlkit_text_recognition/google_mlkit_text_recognition.dart'; // Package baru
 import '../providers/bbm_provider.dart';
 import 'login_screen.dart';
 
@@ -13,7 +14,6 @@ class FormBbmScreen extends StatefulWidget {
 }
 
 class _FormBbmScreenState extends State<FormBbmScreen> {
-  // Variabel Dropdown Plat Nomor
   String? _selectedPlatNomor;
   final List<String> _daftarMobil = [
     'BA 1234 PLN (Hilux)',
@@ -22,7 +22,6 @@ class _FormBbmScreenState extends State<FormBbmScreen> {
     'B 9999 UPT (Triton)'
   ];
 
-  // Variabel Dropdown Jenis BBM (Baru)
   String? _selectedJenisBbm;
   final List<String> _daftarBbm = [
     'Dexlite',
@@ -35,6 +34,8 @@ class _FormBbmScreenState extends State<FormBbmScreen> {
   final _literController = TextEditingController();
   final _biayaController = TextEditingController();
   final _formKey = GlobalKey<FormState>();
+  
+  bool _isScanning = false; // Indikator saat AI sedang membaca struk
 
   @override
   void dispose() {
@@ -50,6 +51,78 @@ class _FormBbmScreenState extends State<FormBbmScreen> {
       context,
       MaterialPageRoute(builder: (context) => const LoginScreen()),
     );
+  }
+
+  // --- FUNGSI AI UNTUK MEMBACA STRUK ---
+  Future<void> _scanStrukOtomatis(String imagePath) async {
+    setState(() {
+      _isScanning = true;
+    });
+
+    try {
+      final inputImage = InputImage.fromFilePath(imagePath);
+      final textRecognizer = TextRecognizer(script: TextRecognitionScript.latin);
+      final RecognizedText recognizedText = await textRecognizer.processImage(inputImage);
+      
+      // Ubah semua teks menjadi huruf besar agar mudah dicari
+      String fullText = recognizedText.text.toUpperCase();
+      
+      // 1. MENDETEKSI JENIS BBM
+      if (fullText.contains('PERTALITE')) {
+        _selectedJenisBbm = 'Pertalite';
+      } else if (fullText.contains('PERTAMAX')) {
+        _selectedJenisBbm = 'Pertamax';
+      } else if (fullText.contains('DEXLITE')) {
+        _selectedJenisBbm = 'Dexlite';
+      } else if (fullText.contains('BIOSOLAR') || fullText.contains('BIO SOLAR')) {
+        _selectedJenisBbm = 'Biosolar';
+      } else if (fullText.contains('PERTAMINA DEX')) {
+        _selectedJenisBbm = 'Pertamina Dex';
+      }
+
+      // 2. MENDETEKSI VOLUME (LITER)
+      // Mencari kata "VOLUME" lalu mengambil angka di sebelahnya
+      RegExp volRegExp = RegExp(r'VOLUME\s*[:\s]*([0-9\,\.]+)');
+      var volMatch = volRegExp.firstMatch(fullText);
+      if (volMatch != null) {
+        String rawVol = volMatch.group(1) ?? '';
+        rawVol = rawVol.replaceAll(',', '.'); // Pastikan format desimal menggunakan titik
+        _literController.text = rawVol;
+      }
+
+      // 3. MENDETEKSI TOTAL BIAYA
+      // Pada struk Pertamina, biasanya menggunakan kata "DIBAYAR KONSUMEN"
+      RegExp hargaRegExp = RegExp(r'KONSUMEN\s*[:\s]*([0-9\,\.]+)');
+      var hargaMatch = hargaRegExp.firstMatch(fullText);
+      if (hargaMatch != null) {
+        String rawHarga = hargaMatch.group(1) ?? '';
+        rawHarga = rawHarga.replaceAll(RegExp(r'[^0-9]'), ''); // Hapus semua titik/koma
+        _biayaController.text = rawHarga;
+      }
+
+      textRecognizer.close();
+      
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Pemindaian berhasil! Periksa kembali data yang terisi.'),
+            backgroundColor: Colors.green,
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Gagal memindai struk. Silakan isi manual.')),
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isScanning = false;
+        });
+      }
+    }
   }
 
   @override
@@ -97,7 +170,6 @@ class _FormBbmScreenState extends State<FormBbmScreen> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              // 1. DROPDOWN PLAT NOMOR
               DropdownButtonFormField<String>(
                 initialValue: _selectedPlatNomor,
                 decoration: const InputDecoration(
@@ -120,9 +192,8 @@ class _FormBbmScreenState extends State<FormBbmScreen> {
               ),
               const SizedBox(height: 16),
               
-              // 2. DROPDOWN JENIS BBM (Pengganti Kilometer)
               DropdownButtonFormField<String>(
-                initialValue: _selectedJenisBbm,
+                value: _selectedJenisBbm, // Gunakan value agar bisa diubah paksa oleh AI
                 decoration: const InputDecoration(
                   labelText: 'Jenis BBM',
                   border: OutlineInputBorder(),
@@ -143,7 +214,6 @@ class _FormBbmScreenState extends State<FormBbmScreen> {
               ),
               const SizedBox(height: 16),
 
-              // 3. BARIS LITER & BIAYA
               Row(
                 children: [
                   Expanded(
@@ -173,11 +243,18 @@ class _FormBbmScreenState extends State<FormBbmScreen> {
               ),
               const SizedBox(height: 24),
 
-              // AREA FOTO STRUK
               const Text('Bukti Struk Pembayaran:', style: TextStyle(fontWeight: FontWeight.bold)),
               const SizedBox(height: 8),
+              
+              // AREA FOTO STRUK
               InkWell(
-                onTap: () => bbmProvider.pickImage(), 
+                // PERUBAHAN: Setelah ambil foto, langsung jalankan fungsi pemindai AI
+                onTap: () async {
+                  await bbmProvider.pickImage();
+                  if (bbmProvider.imageFile != null) {
+                    _scanStrukOtomatis(bbmProvider.imageFile!.path);
+                  }
+                }, 
                 child: Container(
                   height: 150,
                   decoration: BoxDecoration(
@@ -186,13 +263,25 @@ class _FormBbmScreenState extends State<FormBbmScreen> {
                     color: Colors.grey[200],
                   ),
                   child: bbmProvider.imageFile != null
-                      ? ClipRRect(
-                          borderRadius: BorderRadius.circular(8),
-                          child: Image.file(
-                            File(bbmProvider.imageFile!.path),
-                            fit: BoxFit.cover,
-                            width: double.infinity,
-                          ),
+                      ? Stack(
+                          fit: StackFit.expand,
+                          children: [
+                            ClipRRect(
+                              borderRadius: BorderRadius.circular(8),
+                              child: Image.file(
+                                File(bbmProvider.imageFile!.path),
+                                fit: BoxFit.cover,
+                              ),
+                            ),
+                            // Menampilkan loading saat AI sedang membaca gambar
+                            if (_isScanning)
+                              Container(
+                                color: Colors.black.withValues(alpha: 0.5),
+                                child: const Center(
+                                  child: CircularProgressIndicator(color: Colors.white),
+                                ),
+                              ),
+                          ],
                         )
                       : const Column(
                           mainAxisAlignment: MainAxisAlignment.center,
@@ -205,13 +294,12 @@ class _FormBbmScreenState extends State<FormBbmScreen> {
               ),
               const SizedBox(height: 32),
 
-              // TOMBOL SIMPAN
               ElevatedButton(
                 style: ElevatedButton.styleFrom(
                   backgroundColor: Colors.cyan,
                   padding: const EdgeInsets.symmetric(vertical: 16),
                 ),
-                onPressed: bbmProvider.isLoading
+                onPressed: (bbmProvider.isLoading || _isScanning)
                     ? null 
                     : () async {
                         if (_formKey.currentState!.validate()) {
@@ -222,7 +310,6 @@ class _FormBbmScreenState extends State<FormBbmScreen> {
                             return;
                           }
 
-                          // Mengirim data Plat Nomor dan Jenis BBM dari dropdown
                           bool sukses = await bbmProvider.simpanData(
                             platNomor: _selectedPlatNomor!,
                             jenisBbm: _selectedJenisBbm!, 
@@ -237,7 +324,6 @@ class _FormBbmScreenState extends State<FormBbmScreen> {
                               const SnackBar(content: Text('Data berhasil disimpan!')),
                             );
                             
-                            // Reset form
                             setState(() {
                               _selectedPlatNomor = null;
                               _selectedJenisBbm = null;
