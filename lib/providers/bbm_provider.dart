@@ -1,9 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:firebase_storage/firebase_storage.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'dart:io';
+import 'dart:convert'; // Tambahan wajib untuk Base64 Encoding
 
 class BbmProvider with ChangeNotifier {
   XFile? _imageFile;
@@ -17,7 +17,8 @@ class BbmProvider with ChangeNotifier {
   Future<void> pickImage() async {
     final pickedFile = await _picker.pickImage(
       source: ImageSource.camera,
-      imageQuality: 70, 
+      // KUALITAS DITURUNKAN: Agar teks Base64 tidak terlalu raksasa ukurannya
+      imageQuality: 30, 
     );
     if (pickedFile != null) {
       _imageFile = pickedFile;
@@ -27,9 +28,10 @@ class BbmProvider with ChangeNotifier {
 
   Future<bool> simpanData({
     required String platNomor,
-    required String jenisBbm, // Dulu kilometer
+    required String jenisBbm,
     required double liter,
     required double biaya,
+    required DateTime tanggal,
   }) async {
     if (_imageFile == null) return false;
 
@@ -40,20 +42,21 @@ class BbmProvider with ChangeNotifier {
       final user = FirebaseAuth.instance.currentUser;
       final userEmail = user?.email ?? 'supir_anonim';
 
-      String fileName = DateTime.now().millisecondsSinceEpoch.toString();
-      Reference ref = FirebaseStorage.instance.ref().child('struk_bbm/$fileName.jpg');
-      await ref.putFile(File(_imageFile!.path));
-      String imageUrl = await ref.getDownloadURL();
+      // --- PROSES BASE64 ENCODING (MENGGANTIKAN FIREBASE STORAGE) ---
+      final bytes = await File(_imageFile!.path).readAsBytes();
+      final String base64Image = base64Encode(bytes);
+      // -------------------------------------------------------------
 
       DocumentReference docBbm = FirebaseFirestore.instance.collection('riwayat_bbm').doc();
       
       await docBbm.set({
-        'plat_nomor': platNomor,
-        'jenis_bbm': jenisBbm, 
+        'plat_nomor': platNomor.toUpperCase(),
+        'jenis_bbm': jenisBbm,
         'jumlah_liter': liter,
         'total_biaya': biaya,
-        'image_url': imageUrl,
-        'tanggal': FieldValue.serverTimestamp(),
+        // Menyimpan String Base64 langsung ke Firestore, bukan URL
+        'image_url': base64Image, 
+        'tanggal': Timestamp.fromDate(tanggal),
         'petugas': userEmail, 
       });
 

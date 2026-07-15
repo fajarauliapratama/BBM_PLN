@@ -2,7 +2,8 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:google_mlkit_text_recognition/google_mlkit_text_recognition.dart'; // Package baru
+import 'package:google_mlkit_text_recognition/google_mlkit_text_recognition.dart';
+import 'package:intl/intl.dart'; 
 import '../providers/bbm_provider.dart';
 import 'login_screen.dart';
 
@@ -14,20 +15,17 @@ class FormBbmScreen extends StatefulWidget {
 }
 
 class _FormBbmScreenState extends State<FormBbmScreen> {
-  String? _selectedPlatNomor;
-  final List<String> _daftarMobil = [
-    'BA 1234 PLN (Hilux)',
-    'BA 5678 PLN (Avanza)',
-    'BA 9101 PLN (Innova)',
-    'B 9999 UPT (Triton)'
-  ];
+  // Controller untuk input form
+  final _platNomorController = TextEditingController();
+  final _tanggalController = TextEditingController();
+  DateTime _selectedTanggal = DateTime.now(); // Tanggal default hari ini
 
   String? _selectedJenisBbm;
   final List<String> _daftarBbm = [
+    'Pertamax',
     'Dexlite',
     'Pertamina Dex',
     'Biosolar',
-    'Pertamax',
     'Pertalite'
   ];
 
@@ -35,15 +33,25 @@ class _FormBbmScreenState extends State<FormBbmScreen> {
   final _biayaController = TextEditingController();
   final _formKey = GlobalKey<FormState>();
   
-  bool _isScanning = false; // Indikator saat AI sedang membaca struk
+  bool _isScanning = false; // Indikator loading saat AI membaca gambar
+
+  @override
+  void initState() {
+    super.initState();
+    // Mengisi form tanggal secara otomatis saat halaman dibuka
+    _tanggalController.text = DateFormat('dd/MM/yyyy').format(_selectedTanggal);
+  }
 
   @override
   void dispose() {
+    _platNomorController.dispose();
+    _tanggalController.dispose();
     _literController.dispose();
     _biayaController.dispose();
     super.dispose();
   }
 
+  // --- FUNGSI LOGOUT ---
   Future<void> _logout() async {
     await FirebaseAuth.instance.signOut();
     if (!mounted) return;
@@ -53,10 +61,34 @@ class _FormBbmScreenState extends State<FormBbmScreen> {
     );
   }
 
+  // --- FUNGSI MENGUBAH TANGGAL MANUAL ---
+  Future<void> _pilihTanggal(BuildContext context) async {
+    final DateTime? picked = await showDatePicker(
+      context: context,
+      initialDate: _selectedTanggal,
+      firstDate: DateTime(2020),
+      lastDate: DateTime.now(), // Membatasi agar tidak bisa pilih tanggal di masa depan
+    );
+    if (picked != null && picked != _selectedTanggal) {
+      setState(() {
+        _selectedTanggal = picked;
+        _tanggalController.text = DateFormat('dd/MM/yyyy').format(picked);
+      });
+    }
+  }
+
   // --- FUNGSI AI UNTUK MEMBACA STRUK ---
   Future<void> _scanStrukOtomatis(String imagePath) async {
     setState(() {
       _isScanning = true;
+    });
+
+    // Kosongkan form sebelum dipindai agar data lama/sebelumnya tidak nyangkut
+    _platNomorController.clear();
+    _literController.clear();
+    _biayaController.clear();
+    setState(() {
+      _selectedJenisBbm = null;
     });
 
     try {
@@ -64,10 +96,32 @@ class _FormBbmScreenState extends State<FormBbmScreen> {
       final textRecognizer = TextRecognizer(script: TextRecognitionScript.latin);
       final RecognizedText recognizedText = await textRecognizer.processImage(inputImage);
       
-      // Ubah semua teks menjadi huruf besar agar mudah dicari
       String fullText = recognizedText.text.toUpperCase();
+
+      // 1. MENDETEKSI TANGGAL STRUK (Pintar: bisa baca pakai / atau - atau . dan tahun 2/4 digit)
+      RegExp dateRegExp = RegExp(r'([0-3]?[0-9])[\/\-\.]([0-1]?[0-9])[\/\-\.](20[0-9]{2}|[0-9]{2})\b');
+      var dateMatch = dateRegExp.firstMatch(fullText);
+      if (dateMatch != null) {
+        int d = int.parse(dateMatch.group(1)!);
+        int m = int.parse(dateMatch.group(2)!);
+        String yearStr = dateMatch.group(3)!;
+        // Jika tahun terbaca 2 digit (misal 24), jadikan 2024
+        int y = yearStr.length == 2 ? 2000 + int.parse(yearStr) : int.parse(yearStr);
+        
+        setState(() {
+          _selectedTanggal = DateTime(y, m, d);
+          _tanggalController.text = DateFormat('dd/MM/yyyy').format(_selectedTanggal);
+        });
+      }
       
-      // 1. MENDETEKSI JENIS BBM
+      // 2. MENDETEKSI PLAT NOMOR (Mencari teks NOPOL / POLISI / PLAT)
+      RegExp nopolRegExp = RegExp(r'(?:NOPOL|POLISI|POL|PLAT)\s*[:\s]*([A-Z]{1,2}\s*\d{1,4}\s*[A-Z]{0,3})');
+      var nopolMatch = nopolRegExp.firstMatch(fullText);
+      if (nopolMatch != null) {
+        _platNomorController.text = nopolMatch.group(1)!.trim();
+      }
+
+      // 3. MENDETEKSI JENIS BBM
       if (fullText.contains('PERTALITE')) {
         _selectedJenisBbm = 'Pertalite';
       } else if (fullText.contains('PERTAMAX')) {
@@ -80,23 +134,30 @@ class _FormBbmScreenState extends State<FormBbmScreen> {
         _selectedJenisBbm = 'Pertamina Dex';
       }
 
-      // 2. MENDETEKSI VOLUME (LITER)
-      // Mencari kata "VOLUME" lalu mengambil angka di sebelahnya
-      RegExp volRegExp = RegExp(r'VOLUME\s*[:\s]*([0-9\,\.]+)');
-      var volMatch = volRegExp.firstMatch(fullText);
-      if (volMatch != null) {
-        String rawVol = volMatch.group(1) ?? '';
-        rawVol = rawVol.replaceAll(',', '.'); // Pastikan format desimal menggunakan titik
-        _literController.text = rawVol;
+      // 4. MENDETEKSI VOLUME (LITER)
+      String? rawVol;
+      RegExp volRegExp1 = RegExp(r'VOLUME\s*[:\s]*([0-9\,\.]+)');
+      RegExp volRegExp2 = RegExp(r'([0-9\,\.]+)\s*LITER');
+
+      if (volRegExp1.hasMatch(fullText)) {
+        rawVol = volRegExp1.firstMatch(fullText)?.group(1);
+      } else if (volRegExp2.hasMatch(fullText)) {
+        rawVol = volRegExp2.firstMatch(fullText)?.group(1);
       }
 
-      // 3. MENDETEKSI TOTAL BIAYA
-      // Pada struk Pertamina, biasanya menggunakan kata "DIBAYAR KONSUMEN"
+      if (rawVol != null) {
+        rawVol = rawVol.replaceAll(',', '.'); // Ubah koma jadi titik untuk desimal
+        if (rawVol.length <= 6) { // Cegah AI menangkap nomor seri mesin panjang
+          _literController.text = rawVol;
+        }
+      }
+
+      // 5. MENDETEKSI TOTAL BIAYA (DIBAYAR KONSUMEN)
       RegExp hargaRegExp = RegExp(r'KONSUMEN\s*[:\s]*([0-9\,\.]+)');
       var hargaMatch = hargaRegExp.firstMatch(fullText);
       if (hargaMatch != null) {
         String rawHarga = hargaMatch.group(1) ?? '';
-        rawHarga = rawHarga.replaceAll(RegExp(r'[^0-9]'), ''); // Hapus semua titik/koma
+        rawHarga = rawHarga.replaceAll(RegExp(r'[^0-9]'), ''); // Hapus semua pemisah ribuan
         _biayaController.text = rawHarga;
       }
 
@@ -105,7 +166,7 @@ class _FormBbmScreenState extends State<FormBbmScreen> {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-            content: Text('Pemindaian berhasil! Periksa kembali data yang terisi.'),
+            content: Text('Pemindaian selesai! Jika ada kolom kosong, silakan lengkapi manual.'),
             backgroundColor: Colors.green,
           ),
         );
@@ -137,7 +198,6 @@ class _FormBbmScreenState extends State<FormBbmScreen> {
         actions: [
           IconButton(
             icon: const Icon(Icons.logout),
-            tooltip: 'Keluar',
             onPressed: () {
               showDialog(
                 context: context,
@@ -145,10 +205,7 @@ class _FormBbmScreenState extends State<FormBbmScreen> {
                   title: const Text('Konfirmasi'),
                   content: const Text('Apakah Anda yakin ingin keluar?'),
                   actions: [
-                    TextButton(
-                      onPressed: () => Navigator.pop(context),
-                      child: const Text('Batal'),
-                    ),
+                    TextButton(onPressed: () => Navigator.pop(context), child: const Text('Batal')),
                     TextButton(
                       onPressed: () {
                         Navigator.pop(context);
@@ -170,30 +227,91 @@ class _FormBbmScreenState extends State<FormBbmScreen> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              DropdownButtonFormField<String>(
-                initialValue: _selectedPlatNomor,
+              const Text('1. Foto Struk Pembayaran (Otomatis Isi Form):', style: TextStyle(fontWeight: FontWeight.bold)),
+              const SizedBox(height: 8),
+              
+              // AREA KAMERA & FOTO
+              InkWell(
+                onTap: () async {
+                  await bbmProvider.pickImage();
+                  if (bbmProvider.imageFile != null) {
+                    _scanStrukOtomatis(bbmProvider.imageFile!.path);
+                  }
+                }, 
+                child: Container(
+                  height: 150,
+                  decoration: BoxDecoration(
+                    border: Border.all(color: Colors.grey),
+                    borderRadius: BorderRadius.circular(8),
+                    color: Colors.grey[200],
+                  ),
+                  child: bbmProvider.imageFile != null
+                      ? Stack(
+                          fit: StackFit.expand,
+                          children: [
+                            ClipRRect(
+                              borderRadius: BorderRadius.circular(8),
+                              child: Image.file(
+                                File(bbmProvider.imageFile!.path),
+                                fit: BoxFit.cover,
+                              ),
+                            ),
+                            if (_isScanning)
+                              Container(
+                                color: Colors.black.withValues(alpha: 0.5),
+                                child: const Center(
+                                  child: CircularProgressIndicator(color: Colors.white),
+                                ),
+                              ),
+                          ],
+                        )
+                      : const Column(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Icon(Icons.camera_alt, size: 50, color: Colors.grey),
+                            Text('Ketuk untuk memindai struk BBM'),
+                          ],
+                        ),
+                ),
+              ),
+              const SizedBox(height: 24),
+              const Divider(),
+              const SizedBox(height: 16),
+              
+              const Text('2. Koreksi Data Transaksi:', style: TextStyle(fontWeight: FontWeight.bold)),
+              const SizedBox(height: 16),
+
+              // FORM TANGGAL TRANSAKSI
+              TextFormField(
+                controller: _tanggalController,
+                readOnly: true, // Tidak bisa diketik manual
+                onTap: () => _pilihTanggal(context), // Membuka kalender
                 decoration: const InputDecoration(
-                  labelText: 'Pilih Kendaraan',
+                  labelText: 'Tanggal Pengisian',
+                  border: OutlineInputBorder(),
+                  prefixIcon: Icon(Icons.calendar_today),
+                ),
+                validator: (value) => value!.isEmpty ? 'Wajib diisi' : null,
+              ),
+              const SizedBox(height: 16),
+
+              // FORM PLAT NOMOR MANUAL
+              TextFormField(
+                controller: _platNomorController,
+                textCapitalization: TextCapitalization.characters, // Otomatis Huruf Kapital
+                decoration: const InputDecoration(
+                  labelText: 'Plat Nomor',
+                  hintText: 'Misal: BA 1234 PLN',
                   border: OutlineInputBorder(),
                   prefixIcon: Icon(Icons.directions_car),
                 ),
-                items: _daftarMobil.map((String plat) {
-                  return DropdownMenuItem<String>(
-                    value: plat,
-                    child: Text(plat),
-                  );
-                }).toList(),
-                onChanged: (String? newValue) {
-                  setState(() {
-                    _selectedPlatNomor = newValue;
-                  });
-                },
-                validator: (value) => value == null ? 'Silakan pilih kendaraan' : null,
+                validator: (value) => value!.isEmpty ? 'Wajib diisi' : null,
               ),
               const SizedBox(height: 16),
               
+              // DROPDOWN JENIS BBM
               DropdownButtonFormField<String>(
-                value: _selectedJenisBbm, // Gunakan value agar bisa diubah paksa oleh AI
+                value: _selectedJenisBbm, 
                 decoration: const InputDecoration(
                   labelText: 'Jenis BBM',
                   border: OutlineInputBorder(),
@@ -214,6 +332,7 @@ class _FormBbmScreenState extends State<FormBbmScreen> {
               ),
               const SizedBox(height: 16),
 
+              // BARIS LITER & BIAYA
               Row(
                 children: [
                   Expanded(
@@ -241,59 +360,9 @@ class _FormBbmScreenState extends State<FormBbmScreen> {
                   ),
                 ],
               ),
-              const SizedBox(height: 24),
-
-              const Text('Bukti Struk Pembayaran:', style: TextStyle(fontWeight: FontWeight.bold)),
-              const SizedBox(height: 8),
-              
-              // AREA FOTO STRUK
-              InkWell(
-                // PERUBAHAN: Setelah ambil foto, langsung jalankan fungsi pemindai AI
-                onTap: () async {
-                  await bbmProvider.pickImage();
-                  if (bbmProvider.imageFile != null) {
-                    _scanStrukOtomatis(bbmProvider.imageFile!.path);
-                  }
-                }, 
-                child: Container(
-                  height: 150,
-                  decoration: BoxDecoration(
-                    border: Border.all(color: Colors.grey),
-                    borderRadius: BorderRadius.circular(8),
-                    color: Colors.grey[200],
-                  ),
-                  child: bbmProvider.imageFile != null
-                      ? Stack(
-                          fit: StackFit.expand,
-                          children: [
-                            ClipRRect(
-                              borderRadius: BorderRadius.circular(8),
-                              child: Image.file(
-                                File(bbmProvider.imageFile!.path),
-                                fit: BoxFit.cover,
-                              ),
-                            ),
-                            // Menampilkan loading saat AI sedang membaca gambar
-                            if (_isScanning)
-                              Container(
-                                color: Colors.black.withValues(alpha: 0.5),
-                                child: const Center(
-                                  child: CircularProgressIndicator(color: Colors.white),
-                                ),
-                              ),
-                          ],
-                        )
-                      : const Column(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            Icon(Icons.camera_alt, size: 50, color: Colors.grey),
-                            Text('Ketuk untuk foto struk BBM'),
-                          ],
-                        ),
-                ),
-              ),
               const SizedBox(height: 32),
 
+              // TOMBOL SIMPAN
               ElevatedButton(
                 style: ElevatedButton.styleFrom(
                   backgroundColor: Colors.cyan,
@@ -310,11 +379,13 @@ class _FormBbmScreenState extends State<FormBbmScreen> {
                             return;
                           }
 
+                          // Meneruskan data ke Provider dan Database
                           bool sukses = await bbmProvider.simpanData(
-                            platNomor: _selectedPlatNomor!,
+                            platNomor: _platNomorController.text,
                             jenisBbm: _selectedJenisBbm!, 
                             liter: double.parse(_literController.text),
                             biaya: double.parse(_biayaController.text),
+                            tanggal: _selectedTanggal,
                           );
 
                           if (!mounted) return;
@@ -324,12 +395,14 @@ class _FormBbmScreenState extends State<FormBbmScreen> {
                               const SnackBar(content: Text('Data berhasil disimpan!')),
                             );
                             
+                            // Reset state setelah berhasil
                             setState(() {
-                              _selectedPlatNomor = null;
                               _selectedJenisBbm = null;
                             });
+                            _platNomorController.clear();
                             _literController.clear();
                             _biayaController.clear();
+                            _tanggalController.text = DateFormat('dd/MM/yyyy').format(DateTime.now());
                           } else {
                             ScaffoldMessenger.of(context).showSnackBar(
                               const SnackBar(content: Text('Gagal menyimpan data.')),
