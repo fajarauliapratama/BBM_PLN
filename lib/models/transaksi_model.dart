@@ -1,52 +1,34 @@
-import 'package:cloud_firestore/cloud_firestore.dart';
-
 class TransaksiModel {
   final String id;
   final String platNomor;
-  final String petugas;
-  final int kilometer;
+  final String jenisBbm; // Dulu kilometer
   final double jumlahLiter;
   final double totalBiaya;
   final String imageUrl;
   final DateTime tanggal;
+  final String petugas;
 
-  // Constructor
   TransaksiModel({
     required this.id,
     required this.platNomor,
-    required this.petugas,
-    required this.kilometer,
+    required this.jenisBbm,
     required this.jumlahLiter,
     required this.totalBiaya,
     required this.imageUrl,
     required this.tanggal,
+    required this.petugas,
   });
 
-  // Fungsi untuk membaca data mentah dari Firebase menjadi Objek Dart
-  factory TransaksiModel.fromMap(Map<String, dynamic> data, String documentId) {
+  factory TransaksiModel.fromMap(Map<String, dynamic> map, String documentId) {
     return TransaksiModel(
       id: documentId,
-      platNomor: data['platNomor'] ?? '',
-      petugas: data['petugas'] ?? '',
-      kilometer: data['kilometer']?.toInt() ?? 0,
-      jumlahLiter: data['jumlahLiter']?.toDouble() ?? 0.0,
-      totalBiaya: data['totalBiaya']?.toDouble() ?? 0.0,
-      imageUrl: data['imageUrl'] ?? '',
-      // Firebase menyimpan waktu dalam bentuk Timestamp, harus diubah ke DateTime Dart
-      tanggal: (data['tanggal'] as Timestamp).toDate(), 
+      platNomor: map['plat_nomor'] ?? '',
+      jenisBbm: map['jenis_bbm'] ?? '-', // Mengambil data jenis BBM
+      jumlahLiter: (map['jumlah_liter'] ?? 0).toDouble(),
+      totalBiaya: (map['total_biaya'] ?? 0).toDouble(),
+      imageUrl: map['image_url'] ?? '',
+      tanggal: map['tanggal']?.toDate() ?? DateTime.now(),
+      petugas: map['petugas'] ?? 'Unknown',
     );
-  }
-
-  // Fungsi untuk membungkus Objek Dart menjadi data mentah sebelum dikirim ke Firebase
-  Map<String, dynamic> toMap() {
-    return {
-      'platNomor': platNomor,
-      'petugas': petugas,
-      'kilometer': kilometer,
-      'jumlahLiter': jumlahLiter,
-      'totalBiaya': totalBiaya,
-      'imageUrl': imageUrl,
-      'tanggal': Timestamp.fromDate(tanggal),
-    };
   }
 }

@@ -1,72 +1,71 @@
-import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_storage/firebase_storage.dart';
-import '../models/transaksi_model.dart';
-import '../services/firebase_service.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'dart:io';
 
 class BbmProvider with ChangeNotifier {
-  File? imageFile;
-  bool isLoading = false;
-  final FirebaseService _firebaseService = FirebaseService();
+  XFile? _imageFile;
+  bool _isLoading = false;
 
-  // 1. Fungsi untuk membuka kamera HP
+  XFile? get imageFile => _imageFile;
+  bool get isLoading => _isLoading;
+
+  final ImagePicker _picker = ImagePicker();
+
   Future<void> pickImage() async {
-    final pickedFile = await ImagePicker().pickImage(
-      source: ImageSource.camera, 
-      imageQuality: 70, // Kompres ukuran foto agar kuota/storage hemat
+    final pickedFile = await _picker.pickImage(
+      source: ImageSource.camera,
+      imageQuality: 70, 
     );
-    
     if (pickedFile != null) {
-      imageFile = File(pickedFile.path);
-      notifyListeners(); // Memperbarui tampilan layar (munculkan foto)
+      _imageFile = pickedFile;
+      notifyListeners();
     }
   }
 
-  // 2. Fungsi utama untuk menyimpan semua data ke Firebase
   Future<bool> simpanData({
     required String platNomor,
-    required int kilometer,
+    required String jenisBbm, // Dulu kilometer
     required double liter,
     required double biaya,
   }) async {
-    if (imageFile == null) return false; // Tolak jika tidak ada foto struk
+    if (_imageFile == null) return false;
+
+    _isLoading = true;
+    notifyListeners();
 
     try {
-      isLoading = true;
-      notifyListeners(); // Ubah tombol simpan menjadi animasi loading
+      final user = FirebaseAuth.instance.currentUser;
+      final userEmail = user?.email ?? 'supir_anonim';
 
-      // A. Upload Foto ke Firebase Storage terlebih dahulu
       String fileName = DateTime.now().millisecondsSinceEpoch.toString();
       Reference ref = FirebaseStorage.instance.ref().child('struk_bbm/$fileName.jpg');
-      await ref.putFile(imageFile!);
-      String imageUrl = await ref.getDownloadURL(); // Dapatkan link foto
+      await ref.putFile(File(_imageFile!.path));
+      String imageUrl = await ref.getDownloadURL();
 
-      // B. Bungkus data ke dalam Objek Model
-      TransaksiModel transaksi = TransaksiModel(
-        id: '', // Firebase akan membuatkan ID acak secara otomatis
-        platNomor: platNomor,
-        petugas: 'Supir Default', // Sementara kita hardcode sebelum ada fitur Login
-        kilometer: kilometer,
-        jumlahLiter: liter,
-        totalBiaya: biaya,
-        imageUrl: imageUrl,
-        tanggal: DateTime.now(),
-      );
-
-      // C. Simpan teks dan link foto ke Firestore
-      await _firebaseService.simpanDataBBM(transaksi);
-
-      // D. Bersihkan form setelah berhasil
-      imageFile = null;
-      isLoading = false;
-      notifyListeners();
+      DocumentReference docBbm = FirebaseFirestore.instance.collection('riwayat_bbm').doc();
       
-      return true; // Berhasil
-    } catch (e) {
-      isLoading = false;
+      await docBbm.set({
+        'plat_nomor': platNomor,
+        'jenis_bbm': jenisBbm, 
+        'jumlah_liter': liter,
+        'total_biaya': biaya,
+        'image_url': imageUrl,
+        'tanggal': FieldValue.serverTimestamp(),
+        'petugas': userEmail, 
+      });
+
+      _imageFile = null;
+      _isLoading = false;
       notifyListeners();
-      return false; // Gagal
+      return true;
+
+    } catch (e) {
+      _isLoading = false;
+      notifyListeners();
+      return false;
     }
   }
 }

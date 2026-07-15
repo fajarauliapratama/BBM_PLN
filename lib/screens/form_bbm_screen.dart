@@ -1,9 +1,9 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import 'package:firebase_auth/firebase_auth.dart'; // Untuk fitur Logout
+import 'package:firebase_auth/firebase_auth.dart';
 import '../providers/bbm_provider.dart';
-import 'login_screen.dart'; // Import halaman login untuk arah kembali
+import 'login_screen.dart';
 
 class FormBbmScreen extends StatefulWidget {
   const FormBbmScreen({super.key});
@@ -13,9 +13,8 @@ class FormBbmScreen extends StatefulWidget {
 }
 
 class _FormBbmScreenState extends State<FormBbmScreen> {
-  // Variabel untuk Dropdown Plat Nomor
+  // Variabel Dropdown Plat Nomor
   String? _selectedPlatNomor;
-  // Daftar kendaraan operasional PLN (bisa disesuaikan atau diambil dari Firebase nantinya)
   final List<String> _daftarMobil = [
     'BA 1234 PLN (Hilux)',
     'BA 5678 PLN (Avanza)',
@@ -23,20 +22,27 @@ class _FormBbmScreenState extends State<FormBbmScreen> {
     'B 9999 UPT (Triton)'
   ];
 
-  final _kilometerController = TextEditingController();
+  // Variabel Dropdown Jenis BBM (Baru)
+  String? _selectedJenisBbm;
+  final List<String> _daftarBbm = [
+    'Dexlite',
+    'Pertamina Dex',
+    'Biosolar',
+    'Pertamax',
+    'Pertalite'
+  ];
+
   final _literController = TextEditingController();
   final _biayaController = TextEditingController();
   final _formKey = GlobalKey<FormState>();
 
   @override
   void dispose() {
-    _kilometerController.dispose();
     _literController.dispose();
     _biayaController.dispose();
     super.dispose();
   }
 
-  // --- FUNGSI LOGOUT ---
   Future<void> _logout() async {
     await FirebaseAuth.instance.signOut();
     if (!mounted) return;
@@ -56,12 +62,10 @@ class _FormBbmScreenState extends State<FormBbmScreen> {
         backgroundColor: Colors.cyan,
         foregroundColor: Colors.white,
         actions: [
-          // Tombol Logout
           IconButton(
             icon: const Icon(Icons.logout),
             tooltip: 'Keluar',
             onPressed: () {
-              // Dialog konfirmasi sebelum logout
               showDialog(
                 context: context,
                 builder: (context) => AlertDialog(
@@ -74,8 +78,8 @@ class _FormBbmScreenState extends State<FormBbmScreen> {
                     ),
                     TextButton(
                       onPressed: () {
-                        Navigator.pop(context); // Tutup dialog
-                        _logout(); // Eksekusi fungsi logout
+                        Navigator.pop(context);
+                        _logout();
                       },
                       child: const Text('Keluar', style: TextStyle(color: Colors.red)),
                     ),
@@ -93,7 +97,7 @@ class _FormBbmScreenState extends State<FormBbmScreen> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              // --- DROPDOWN PLAT NOMOR ---
+              // 1. DROPDOWN PLAT NOMOR
               DropdownButtonFormField<String>(
                 initialValue: _selectedPlatNomor,
                 decoration: const InputDecoration(
@@ -116,18 +120,30 @@ class _FormBbmScreenState extends State<FormBbmScreen> {
               ),
               const SizedBox(height: 16),
               
-              TextFormField(
-                controller: _kilometerController,
-                keyboardType: TextInputType.number,
+              // 2. DROPDOWN JENIS BBM (Pengganti Kilometer)
+              DropdownButtonFormField<String>(
+                initialValue: _selectedJenisBbm,
                 decoration: const InputDecoration(
-                  labelText: 'Odometer saat ini (KM)',
+                  labelText: 'Jenis BBM',
                   border: OutlineInputBorder(),
-                  prefixIcon: Icon(Icons.speed),
+                  prefixIcon: Icon(Icons.local_gas_station),
                 ),
-                validator: (value) => value!.isEmpty ? 'Wajib diisi' : null,
+                items: _daftarBbm.map((String bbm) {
+                  return DropdownMenuItem<String>(
+                    value: bbm,
+                    child: Text(bbm),
+                  );
+                }).toList(),
+                onChanged: (String? newValue) {
+                  setState(() {
+                    _selectedJenisBbm = newValue;
+                  });
+                },
+                validator: (value) => value == null ? 'Silakan pilih jenis BBM' : null,
               ),
               const SizedBox(height: 16),
 
+              // 3. BARIS LITER & BIAYA
               Row(
                 children: [
                   Expanded(
@@ -206,10 +222,10 @@ class _FormBbmScreenState extends State<FormBbmScreen> {
                             return;
                           }
 
-                          // Jalankan proses simpan dengan nilai Dropdown
+                          // Mengirim data Plat Nomor dan Jenis BBM dari dropdown
                           bool sukses = await bbmProvider.simpanData(
-                            platNomor: _selectedPlatNomor!, // Ambil dari dropdown
-                            kilometer: int.parse(_kilometerController.text),
+                            platNomor: _selectedPlatNomor!,
+                            jenisBbm: _selectedJenisBbm!, 
                             liter: double.parse(_literController.text),
                             biaya: double.parse(_biayaController.text),
                           );
@@ -221,11 +237,11 @@ class _FormBbmScreenState extends State<FormBbmScreen> {
                               const SnackBar(content: Text('Data berhasil disimpan!')),
                             );
                             
-                            // Reset form (termasuk dropdown)
+                            // Reset form
                             setState(() {
                               _selectedPlatNomor = null;
+                              _selectedJenisBbm = null;
                             });
-                            _kilometerController.clear();
                             _literController.clear();
                             _biayaController.clear();
                           } else {

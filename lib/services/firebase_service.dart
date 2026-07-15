@@ -6,17 +6,6 @@ class FirebaseService {
   final CollectionReference _transaksiCollection =
       FirebaseFirestore.instance.collection('riwayat_bbm');
 
-  // Fungsi untuk menyimpan data transaksi baru
-  Future<void> simpanDataBBM(TransaksiModel transaksi) async {
-    try {
-      // Mengubah objek Dart menjadi Map lalu mengirimnya ke Firebase
-      await _transaksiCollection.add(transaksi.toMap());
-    } catch (e) {
-      // Menangkap error jika gagal (misal: koneksi terputus)
-      throw Exception('Gagal menyimpan data ke database: $e');
-    }
-  }
-
   // Fungsi untuk mengambil seluruh data (Untuk Halaman History Admin)
   Stream<List<TransaksiModel>> getRiwayatBBM() {
     return _transaksiCollection
